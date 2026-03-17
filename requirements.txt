@@ -1,0 +1,53 @@
+# --- LLM Core ---
+langchain>=0.2.12
+langgraph>=0.2.20
+llama-index>=0.10.50
+openai>=1.40.0
+tiktoken>=0.7.0
+python-dotenv>=1.0.1
+pypdf>=4.2.0
+
+# --- API Calls
+requests>=2.31.0
+
+# --- Vector DB ---
+faiss-cpu>=1.8.0
+# chromadb>=0.5.5  # opcional
+
+# --- Numerical Core ---
+numpy<2
+tqdm>=4.66.0
+pillow>=10.0.0
+regex>=2024.5.15
+
+# --- DICOM ---
+pydicom>=2.4.4
+
+# --- Embeddings (image) ---
+torch>=2.1.0
+torchvision>=0.16.0
+open_clip_torch>=3.2.0
+timm>=1.0.24
+ftfy>=6.2.0
+huggingface_hub>=0.20.0       # BiomedCLIP via hf-hub
+
+# --- Embeddings (text) ---
+sentence-transformers>=3.0.0
+transformers>=4.41.0
+tokenizers>=0.19.0
+
+# --- Hybrid RAG (NEW) ---
+rank-bm25>=0.2.2          # BM25 keyword search
+spacy>=3.7.0              # NLP: NER, chunking, sentence splitting
+nltk>=3.8.0               # NLP: tokenization, stopwords, stemming
+
+# --- Medical NER ---
+scispacy>=0.5.3            # Biomedical NER (Allen AI)
+# Model install: pip install https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.3/en_ner_bc5cdr_md-0.5.3.tar.gz
+
+# --- Reranker (NEW) ---
+# cross-encoder is part of sentence-transformers, no extra dep needed
+
+# --- Demo UI (NEW) ---
+streamlit>=1.35.0
+
