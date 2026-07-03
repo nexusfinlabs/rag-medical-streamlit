@@ -131,8 +131,9 @@ MODEL_PRICING = {
 }
 ROLE_MODEL = {
     "pv": "Claude Opus 4.8", "regulatory": "Claude Opus 4.8", "biostat": "Claude Opus 4.8",
+    "medinfo": "Claude Opus 4.8",
     "derma": "Claude Sonnet 5", "clintrials": "Claude Sonnet 5", "commercial": "Claude Sonnet 5",
-    "market-access": "Claude Sonnet 5", "medinfo": "Claude Sonnet 5",
+    "market-access": "Claude Sonnet 5",
 }
 
 def estimar_tokens_billing(query, results, model, output_tokens_est=400):
@@ -490,13 +491,14 @@ st.markdown("""
 | pv | rag-pv-datalake4 | rag-pv, rag-medinfo, rag-regulatory, argus-safety | busqueda-senal, redaccion-psur, intake-triage-icsr | Claude Opus 4.8 |
 | regulatory | rag-regulatory-datalake5 | rag-regulatory, rag-medinfo, rag-clintrials, veeva-vault | ensamblaje-ectd, respuesta-preguntas-agencia | Claude Opus 4.8 |
 | market-access | rag-market-access-datalake6 | rag-market-access, rag-clintrials, rag-medinfo | dossier-hta, gap-analysis-evidencia | Claude Sonnet 5 |
-| medinfo | rag-medinfo-datalake7 | rag-medinfo, rag-pv, rag-regulatory, rag-kol | respuesta-consulta-medica, alineacion-ficha-tecnica | Claude Sonnet 5 |
+| medinfo | rag-medinfo-datalake7 | rag-medinfo, rag-pv, rag-regulatory, rag-kol | respuesta-consulta-medica, alineacion-ficha-tecnica | Claude Opus 4.8 |
 | biostat | rag-clintrials-datalake1 (vía Claude Code) | rag-clintrials, rag-regulatory, databricks-unity | revision-sap-plan-analisis, validacion-tlf-adam | Claude Opus 4.8 |
 """)
 st.caption(
     "Datos verificados contra los 8 `plugin.json` y `.mcp.json` reales del repo pharma-plugins. "
-    "Modelo propuesto por criticidad — Opus 4.8 en squads de alto riesgo (PV, Regulatory, Biostat), "
-    "Sonnet 5 en el resto por coste/latencia — a confirmar antes de fijarlo en GOBERNANZA.md."
+    "Modelo por criticidad — Opus 4.8 en PV, Regulatory, MedInfo y Biostat (mayor coste de un "
+    "error de razonamiento: señales de seguridad, sumisiones a agencia, respuesta médica, "
+    "validación estadística); Sonnet 5 en el resto. Fijado en GOBERNANZA.md."
 )
 
 # ─── FinOps: simulación de coste/billing por squad ─────────
