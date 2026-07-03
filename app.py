@@ -499,6 +499,72 @@ st.caption(
     "Sonnet 5 en el resto por coste/latencia — a confirmar antes de fijarlo en GOBERNANZA.md."
 )
 
+# ─── FinOps: simulación de coste/billing por squad ─────────
+st.divider()
+st.header("💰 FinOps — simulación de coste/billing por squad")
+
+periodo = st.radio("Periodo de facturación", ["Semana", "Mes"], horizontal=True, key="finops_periodo")
+multiplicador = 1 if periodo == "Semana" else 4
+
+def format_tokens(n):
+    if n >= 1_000_000:
+        return f"{n/1_000_000:.2f}M"
+    if n >= 1_000:
+        return f"{n/1_000:.0f}K"
+    return str(n)
+
+SQUAD_USAGE_SIM = {
+    "pv":            {"queries_semana": 120, "tok_in": 3500, "tok_out": 600},
+    "commercial":    {"queries_semana": 400, "tok_in": 1800, "tok_out": 400},
+    "regulatory":    {"queries_semana": 90,  "tok_in": 5000, "tok_out": 700},
+    "clintrials":    {"queries_semana": 150, "tok_in": 2800, "tok_out": 500},
+    "market-access": {"queries_semana": 60,  "tok_in": 2200, "tok_out": 450},
+    "medinfo":       {"queries_semana": 250, "tok_in": 2000, "tok_out": 400},
+    "derma":         {"queries_semana": 100, "tok_in": 2600, "tok_out": 450},
+    "biostat":       {"queries_semana": 40,  "tok_in": 4000, "tok_out": 600},
+}
+
+rows, model_agg = [], {}
+total_cost = total_tokens = 0
+
+for squad, usage in SQUAD_USAGE_SIM.items():
+    queries = usage["queries_semana"] * multiplicador
+    tok_in = queries * usage["tok_in"]
+    tok_out = queries * usage["tok_out"]
+    model = ROLE_MODEL[squad]
+    price = MODEL_PRICING[model]
+    cost = (tok_in / 1_000_000 * price["input"]) + (tok_out / 1_000_000 * price["output"])
+    total_cost += cost
+    total_tokens += tok_in + tok_out
+    agg = model_agg.setdefault(model, {"tokens": 0, "cost": 0.0, "squads": 0})
+    agg["tokens"] += tok_in + tok_out
+    agg["cost"] += cost
+    agg["squads"] += 1
+    rows.append((squad, model, ROLE_DATALAKE[squad], queries, tok_in, tok_out, cost))
+
+st.subheader("Por squad / equipo")
+table_md = "| Squad | Modelo | Datalake | Queries | Tokens in | Tokens out | Coste |\n|---|---|---|---|---|---|---|\n"
+for squad, model, datalake, queries, tok_in, tok_out, cost in rows:
+    table_md += f"| {squad} — {ROLE_LABELS[squad]} | {model} | {datalake} | {queries:,} | {format_tokens(tok_in)} | {format_tokens(tok_out)} | ${cost:,.2f} |\n"
+st.markdown(table_md)
+
+fc1, fc2, fc3 = st.columns(3)
+fc1.metric(f"💵 Coste total org / {periodo.lower()}", f"${total_cost:,.2f}")
+fc2.metric(f"🔢 Tokens totales / {periodo.lower()}", format_tokens(total_tokens))
+fc3.metric("👥 Squads activos", len(SQUAD_USAGE_SIM))
+
+st.subheader("Agregado por modelo")
+model_md = "| Modelo | Squads que lo usan | Tokens totales | Coste total |\n|---|---|---|---|\n"
+for model, agg in model_agg.items():
+    model_md += f"| {model} | {agg['squads']} | {format_tokens(agg['tokens'])} | ${agg['cost']:,.2f} |\n"
+st.markdown(model_md)
+
+st.caption(
+    "Simulación ilustrativa — volúmenes de queries y tokens estimados para dar ejemplo, no son datos reales de producción. "
+    "En producción esto vendría de `finops/usage_by_role.csv` (export periódico de la Admin Console de Claude Enterprise "
+    "cruzado con pertenencia a grupos de Entra ID) y se agregaría en `finops/showback_by_department.xlsx` para el steering."
+)
+
 # ─── Footer ─────────────────────────────────────────────────
 st.divider()
 st.markdown("""
