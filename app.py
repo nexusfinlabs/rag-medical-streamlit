@@ -77,8 +77,70 @@ st.markdown("""
         margin-top: -0.5rem;
         margin-bottom: 0.5rem;
     }
+
+    /* RBAC access badges */
+    .access-ok {
+        background: #ECFDF5;
+        border: 1px solid #A7F3D0;
+        border-left: 4px solid #10B981;
+        border-radius: 8px;
+        padding: 0.7rem 1rem;
+        margin: 0.6rem 0 1rem;
+        font-size: 0.9rem;
+        color: #065F46;
+    }
+    .access-denied {
+        background: #FEF2F2;
+        border: 1px solid #FECACA;
+        border-left: 4px solid #DC2626;
+        border-radius: 8px;
+        padding: 1rem 1.2rem;
+        margin: 0.6rem 0 1rem;
+        font-size: 0.92rem;
+        color: #7F1D1D;
+    }
+    .access-denied strong { color: #991B1B; }
+    .access-denied table { width: 100%; border-collapse: collapse; margin-top: 0.6rem; font-size: 0.85rem; }
+    .access-denied td, .access-denied th { padding: 0.3rem 0.5rem; text-align: left; border-bottom: 1px solid #FCA5A5; }
+    .access-denied td.yes { color: #065F46; font-weight: 600; }
+    .access-denied td.no { color: #991B1B; }
 </style>
 """, unsafe_allow_html=True)
+
+# ─── RBAC: rol -> acceso a este datalake ────────────────────
+ROLES = ["derma", "clintrials", "pv", "commercial", "regulatory", "market-access", "medinfo", "biostat"]
+ROLE_LABELS = {
+    "derma": "Dermatology", "clintrials": "Clinical Operations", "pv": "Pharmacovigilance",
+    "commercial": "Commercial", "regulatory": "Regulatory Affairs", "market-access": "Market Access",
+    "medinfo": "Medical Affairs", "biostat": "Biostatistics",
+}
+ROLE_DATALAKE = {
+    "derma": "rag-derma-datalake3", "clintrials": "rag-clintrials-datalake1", "pv": "rag-pv-datalake4",
+    "commercial": "rag-commercial-datalake2", "regulatory": "rag-regulatory-datalake5",
+    "market-access": "rag-market-access-datalake6", "medinfo": "rag-medinfo-datalake7", "biostat": "rag-clintrials-datalake1",
+}
+AUTHORIZED_ROLES = {"derma", "clintrials"}
+THIS_DATALAKE = "rag-derma-datalake3 (CT + Dermatología combinado)"
+
+# ─── FinOps: precio input/output por 1M tokens ──────────────
+MODEL_PRICING = {
+    "Claude Opus 4.8":  {"input": 5.00, "output": 25.00, "note": "precio oficial Anthropic"},
+    "Claude Sonnet 5":  {"input": 3.00, "output": 15.00, "note": "precio oficial Anthropic (intro $2.00/$10.00 hasta 31-ago-2026)"},
+    "GPT-5":            {"input": 5.00, "output": 15.00, "note": "estimado — verificar con OpenAI"},
+    "Gemini 2.5 Pro":   {"input": 1.25, "output": 5.00,  "note": "estimado — verificar con Google"},
+}
+ROLE_MODEL = {
+    "pv": "Claude Opus 4.8", "regulatory": "Claude Opus 4.8", "biostat": "Claude Opus 4.8",
+    "derma": "Claude Sonnet 5", "clintrials": "Claude Sonnet 5", "commercial": "Claude Sonnet 5",
+    "market-access": "Claude Sonnet 5", "medinfo": "Claude Sonnet 5",
+}
+
+def estimar_tokens_billing(query, results, model, output_tokens_est=400):
+    chars = len(query) + sum(len(r.get("text", "")) for r in results)
+    input_tokens = max(1, chars // 4)
+    price = MODEL_PRICING[model]
+    coste = (input_tokens / 1_000_000 * price["input"]) + (output_tokens_est / 1_000_000 * price["output"])
+    return input_tokens, output_tokens_est, coste, price
 
 # ─── Header ─────────────────────────────────────────────────
 st.title("🏥 Medical RAG — Hybrid Search")
@@ -112,29 +174,47 @@ with st.sidebar:
         """)
     
     with st.expander("📝 Queries de ejemplo", expanded=True):
-        st.markdown("""
-        ```
-        lung nodule thin slice
-        SIEMENS 1.25mm
-        CT THORAX contrast GE
-        chest CT screening protocol
-        manufacturer kvp 120
-        ```
-        """)
-    
+        st.markdown("**🫁 Cáncer de pulmón (CT):**")
+        lung_queries = [
+            "lung nodule thin slice SIEMENS 1.25mm",
+            "CT THORAX contrast GE chest screening kvp 120",
+            "pulmonary nodule spiculated margin low-dose",
+        ]
+        for q in lung_queries:
+            if st.button(q, key=f"btn_lung_{q[:20]}", use_container_width=True):
+                st.session_state["query_prefill"] = q
+
+        st.markdown("**🩺 Dermatología (Fitzpatrick17k):**")
+        derma_queries = [
+            "atopic dermatitis eczema pruritus inflammatory",
+            "psoriasis plaque erythematous scaling skin",
+            "melanoma suspicious lesion asymmetry border",
+        ]
+        for q in derma_queries:
+            if st.button(q, key=f"btn_derma_{q[:20]}", use_container_width=True):
+                st.session_state["query_prefill"] = q
+
     st.divider()
-    st.header("📊 Dataset Cargado")
-    
-    pairs_path = Path("data/metadata/pairs.jsonl")
-    if pairs_path.exists():
-        n_docs = sum(1 for _ in open(pairs_path))
-        st.metric("CT Slices indexados", f"{n_docs:,}")
+    st.header("📊 Datasets Indexados")
+
+    ct_path = Path("data/metadata/pairs.jsonl")
+    derma_path = Path("/data/rag-derma/data/metadata/pairs.jsonl")
+
+    if ct_path.exists():
+        n_ct = sum(1 for _ in open(ct_path))
+        st.metric("🫁 CT Slices (LIDC-IDRI)", f"{n_ct:,}")
     else:
-        st.warning("⚠️ pairs.jsonl no encontrado — ejecuta el pipeline de ingesta primero")
-        n_docs = 0
-    
-    st.metric("Fuente", "TCIA LIDC-IDRI")
-    st.metric("Modalidad", "CT Chest / Lung")
+        n_ct = 0
+
+    if derma_path.exists():
+        n_derma = sum(1 for _ in open(derma_path))
+        st.metric("🩺 Casos Derma (Fitzpatrick17k)", f"{n_derma:,}")
+    else:
+        st.info("⏳ Indexando Fitzpatrick17k...")
+        n_derma = 0
+
+    st.metric("Fuente CT", "TCIA LIDC-IDRI")
+    st.metric("Fuente Derma", "Fitzpatrick17k (114 diagnósticos)")
     
     st.divider()
     st.header("🔧 Stack Técnico")
@@ -149,14 +229,21 @@ with st.sidebar:
     """)
 
 # ─── Main: Search Interface ────────────────────────────────
-st.header("🔍 Buscar en la base de datos médica")
+st.header("🤖 Prompt Datos Médicos (Claude Chat/Code, GPT Chat/Codex)")
+st.markdown("""
+<div class="info-box">
+    Esta interfaz es equivalente a ejecutar el mismo prompt directamente en <strong>Claude Desktop</strong> o en <strong>Claude.ai (Chat)</strong> — el conector MCP con RBAC por rol es el mismo, así que lo que ves aquí (acceso autorizado o no, según el rol) es exactamente lo que verías allí.
+</div>
+""", unsafe_allow_html=True)
 
 col1, col2 = st.columns([3, 1])
 with col1:
+    prefill = st.session_state.pop("query_prefill", "")
     query = st.text_input(
         "Escribe tu pregunta",
-        placeholder="Ej: lung nodule thin slice SIEMENS",
-        help="Escribe en inglés. Puedes combinar términos exactos (SIEMENS, 1.25mm) con conceptos (thin slices, lung cancer).",
+        value=prefill,
+        placeholder="Ej: atopic dermatitis eczema | lung nodule thin slice SIEMENS",
+        help="Escribe en inglés. Usa los botones de la barra lateral para queries de ejemplo.",
     )
 with col2:
     mode = st.selectbox(
@@ -164,6 +251,42 @@ with col2:
         ["hybrid", "bm25", "vector"],
         help="🟢 Hybrid = BM25 + Vector combinados (recomendado). 🟡 BM25 = keywords exactos. 🟣 Vector = búsqueda semántica.",
     )
+
+col_model, col_role = st.columns(2)
+with col_model:
+    model = st.selectbox(
+        "Modelo IA",
+        ["Claude Opus 4.8", "Claude Sonnet 5", "GPT-5", "Gemini 2.5 Pro"],
+        help="Modelo que razona sobre los resultados recuperados. Claude se conecta vía MCP con RBAC por rol.",
+    )
+with col_role:
+    role = st.selectbox(
+        "Rol",
+        ROLES,
+        format_func=lambda r: f"{r} — {ROLE_LABELS[r]}",
+        help="Simula con qué rol/squad entras a Claude. Determina si tienes acceso a este datalake concreto.",
+    )
+
+is_authorized = role in AUTHORIZED_ROLES
+if is_authorized:
+    st.markdown(f"""
+    <div class="access-ok">✅ <strong>Acceso autorizado</strong> — el rol <strong>{role} ({ROLE_LABELS[role]})</strong> tiene permiso RBAC sobre <strong>{THIS_DATALAKE}</strong>.</div>
+    """, unsafe_allow_html=True)
+else:
+    rows = "".join(
+        f"<tr><td>{r} — {ROLE_LABELS[r]}</td><td class='{'yes' if r in AUTHORIZED_ROLES else 'no'}'>{'✅ ' + ROLE_DATALAKE[r] if r in AUTHORIZED_ROLES else '🚫 sin acceso a ' + THIS_DATALAKE.split(' ')[0]}</td></tr>"
+        for r in ROLES
+    )
+    st.markdown(f"""
+    <div class="access-denied">
+        🚫 <strong>Acceso No autorizado</strong> — el rol <strong>{role} ({ROLE_LABELS[role]})</strong> no tiene permiso RBAC sobre <strong>{THIS_DATALAKE}</strong>.
+        Solo <strong>Dermatology</strong> y <strong>Clinical Operations</strong> tienen acceso a este datalake concreto — cada squad ve únicamente los conectores MCP de su ámbito, igual que en Claude Desktop.
+        <table>
+            <tr><th>Rol</th><th>Acceso a este datalake</th></tr>
+            {rows}
+        </table>
+    </div>
+    """, unsafe_allow_html=True)
 
 col_k, col_rerank = st.columns(2)
 with col_k:
@@ -180,12 +303,14 @@ with col_rerank:
     )
 
 # ─── Search Execution ──────────────────────────────────────
-if query and st.button("🚀 Buscar", type="primary"):
+if query and st.button("🚀 Buscar", type="primary", disabled=not is_authorized):
+    if not is_authorized:
+        st.stop()
     try:
         from rag.hybrid_search import HybridSearchEngine
         
         with st.spinner("Cargando motor de búsqueda..."):
-            engine = HybridSearchEngine()
+            engine = HybridSearchEngine(pairs_path='/data/rag-combined/data/metadata/pairs.jsonl', text_emb_path='/data/rag-combined/data/embeddings/text_embeddings.npz')
         
         t0 = time.time()
         results = engine.search(query, k=k, mode=mode, use_reranker=use_reranker)
@@ -198,12 +323,28 @@ if query and st.button("🚀 Buscar", type="primary"):
         m3.metric("📈 Top Score", f"{results[0]['score']:.4f}" if results else "N/A")
         mode_labels = {"hybrid": "🟢 Hybrid", "bm25": "🟡 BM25", "vector": "🟣 Vector"}
         m4.metric("🔧 Modo", mode_labels.get(mode, mode))
-        
+
         if use_reranker:
             st.success("✨ Reranker aplicado — resultados re-evaluados con Cross-Encoder")
-        
+
+        # ─── FinOps: tokens y billing en tiempo real ───────────
         st.divider()
-        
+        st.subheader("💰 Calcula tokens/billing")
+        in_tok, out_tok, coste, price = estimar_tokens_billing(query, results, model)
+        f1, f2, f3, f4 = st.columns(4)
+        f1.metric("📥 Tokens input (aprox)", f"{in_tok:,}")
+        f2.metric("📤 Tokens output (est)", f"{out_tok:,}")
+        f3.metric("💵 Coste este query", f"${coste:.5f}")
+        f4.metric("🏷️ Modelo", model)
+        st.caption(
+            f"Estimación ~4 caracteres/token sobre la pregunta + el texto recuperado de **{THIS_DATALAKE}**. "
+            f"Precio {model}: ${price['input']:.2f} / ${price['output']:.2f} por 1M tokens (input/output) — {price['note']}. "
+            f"Se facturaría internamente contra el squad **{role} ({ROLE_LABELS[role]})** vía **{ROLE_DATALAKE[role]}**, "
+            f"agregado en `finops/usage_by_role.csv` (ver Fase 2 · Gobierno operativo del roadmap)."
+        )
+
+        st.divider()
+
         # Results
         for r in results:
             css_class = mode if mode != "hybrid" else "hybrid"
@@ -317,7 +458,7 @@ if compare_query and st.button("⚔️ Comparar los 3 modos"):
         from rag.hybrid_search import HybridSearchEngine
         
         with st.spinner("Cargando motor..."):
-            engine = HybridSearchEngine()
+            engine = HybridSearchEngine(pairs_path='/data/rag-combined/data/metadata/pairs.jsonl', text_emb_path='/data/rag-combined/data/embeddings/text_embeddings.npz')
         
         c1, c2, c3 = st.columns(3)
         
@@ -336,6 +477,27 @@ if compare_query and st.button("⚔️ Comparar los 3 modos"):
                     st.warning("Sin resultados")
     except Exception as e:
         st.error(str(e))
+
+# ─── Squads → Datalakes → Skills → MCP ─────────────────────
+st.divider()
+st.header("🗂️ Squads → Datalakes → Skills → MCP")
+st.markdown("""
+| Squad (rol) | Datalake | MCP servers | Skills por defecto | Modelo propuesto |
+|---|---|---|---|---|
+| derma | rag-derma-datalake3 | rag-derma, rag-clintrials, rag-medinfo, rag-competitive-intel | scoring-easi-pasi-imagen, benchmarking-competitivo-derma | Claude Sonnet 5 |
+| clintrials (ClinOps) | rag-clintrials-datalake1 | rag-clintrials, rag-pv, rag-competitive-intel, ctms-edc | feasibility-y-reclutamiento, desviaciones-protocolo | Claude Sonnet 5 |
+| commercial | rag-commercial-datalake2 | rag-commercial, rag-medinfo, rag-kol, veeva-vault | validacion-reclamos-mlr, argumentario-y-contenido | Claude Sonnet 5 |
+| pv | rag-pv-datalake4 | rag-pv, rag-medinfo, rag-regulatory, argus-safety | busqueda-senal, redaccion-psur, intake-triage-icsr | Claude Opus 4.8 |
+| regulatory | rag-regulatory-datalake5 | rag-regulatory, rag-medinfo, rag-clintrials, veeva-vault | ensamblaje-ectd, respuesta-preguntas-agencia | Claude Opus 4.8 |
+| market-access | rag-market-access-datalake6 | rag-market-access, rag-clintrials, rag-medinfo | dossier-hta, gap-analysis-evidencia | Claude Sonnet 5 |
+| medinfo | rag-medinfo-datalake7 | rag-medinfo, rag-pv, rag-regulatory, rag-kol | respuesta-consulta-medica, alineacion-ficha-tecnica | Claude Sonnet 5 |
+| biostat | rag-clintrials-datalake1 (vía Claude Code) | rag-clintrials, rag-regulatory, databricks-unity | revision-sap-plan-analisis, validacion-tlf-adam | Claude Opus 4.8 |
+""")
+st.caption(
+    "Datos verificados contra los 8 `plugin.json` y `.mcp.json` reales del repo pharma-plugins. "
+    "Modelo propuesto por criticidad — Opus 4.8 en squads de alto riesgo (PV, Regulatory, Biostat), "
+    "Sonnet 5 en el resto por coste/latencia — a confirmar antes de fijarlo en GOBERNANZA.md."
+)
 
 # ─── Footer ─────────────────────────────────────────────────
 st.divider()
